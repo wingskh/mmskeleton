@@ -4,7 +4,7 @@ weights: ./models/st_gcn.kinetics.pt
 model: net.st_gcn.Model
 model_args:
   in_channels: 3
-  num_class: 400
+  num_class: 2
   edge_importance_weighting: True
   graph_args:
     layout: "openpose"

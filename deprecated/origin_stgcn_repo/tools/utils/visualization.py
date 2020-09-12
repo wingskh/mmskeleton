@@ -1,6 +1,6 @@
 import cv2
 import numpy as np
-
+import sys
 
 def stgcn_visualize(pose,
                     edge,

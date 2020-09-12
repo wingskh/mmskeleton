@@ -1,0 +1,24 @@
+# command line: main.py demo_offline --openpose /home/wing_mac/action_recognition/openpose/build --video /home/wing_mac/action_recognition/mmskeleton/deprecated/origin_stgcn_repo/video/catch_wire_3.mp4
+
+config: ./configs/recognition/st_gcn_aaai18/datax/demo_offline.yaml
+device:
+- 0
+height: 1080
+ignore_weights: []
+model: mmskeleton.models.backbones.ST_GCN_18
+model_args:
+    edge_importance_weighting: true
+    graph_cfg:
+        layout: coco
+        strategy: spatial
+    in_channels: 3
+    num_class: 7
+model_fps: 30
+model_input_frame: 128
+openpose: /home/wing_mac/action_recognition/openpose/build
+print_log: false
+save_log: true
+use_gpu: true
+video: /home/wing_mac/action_recognition/mmskeleton/deprecated/origin_stgcn_repo/video/catch_wire_3.mp4
+weights: ./work_dir/recognition/st_gcn/dataset_example/latest_epoch_65.pt
+work_dir: ./work_dir/tmp

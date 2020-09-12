@@ -1,74 +1,63 @@
-# MMSkeleton
+# Action Recognition Using mmskeleton
 
-## Introduction
+## Installation
 
-MMSkeleton is an open source toolbox for skeleton-based human understanding.
-It is a part of the [open-mmlab](https://github.com/open-mmlab) project in the charge of [Multimedia Laboratory, CUHK](http://mmlab.ie.cuhk.edu.hk/).
-MMSkeleton is developed on our research project [ST-GCN](https://github.com/yysijie/st-gcn/blob/master/OLD_README.md).
+Follow the below link to install mmskeleton, mmdetection and openpose.
+(Must use "python setup.py develop --mmdet" to install the older version of mmdetection)
+https://github.com/open-mmlab/mmskeleton
 
-<p align="center">
-    <img src="demo/recognition/demo_video.gif", width="700">
-</p>
+### Suggested version
 
-## Updates
-- [2020-01-21] MMSkeleton v0.7 is released.
-- [2019-10-09] MMSkeleton v0.6 is released.
-- [2019-10-08] Support model zoo.
-- [2019-10-02] Support custom dataset.
-- [2019-09-23] Add video-based pose estimation demo.
-- [2019-08-29] MMSkeleton v0.5 is released.
+pip install mmcv==0.4.3 -i https://pypi.tuna.tsinghua.edu.cn/simple
+conda install pytorch==1.3.0 torchvision cudatoolkit=10.1 -c pytorch
 
+## Instruction
 
-## Features
+1. Rescale the training video to 340\*256 and set frame rate to 30fps
+   Useful ffmpeg comman under video folder:
 
-- **High extensibility**
+   ```
+   for i in *.mp4; do ffmpeg -i "$i" -vf scale=340:256 "[path to output folder]/${i}"; done
+   for i in *.mp4; do ffmpeg -i "$i" -filter:v fps=fps=30 "[path to output folder]/${i}"; done
+   ```
 
-    MMSkeleton provides a flexible framework for organizing codes and projects systematically, with the ability to extend to various tasks and scale up to complex deep models.
+2. Put the training video to ./resource/data_example/
 
-- **Multiple tasks**
+3. Modify the ./resource/data_example/category_annotation_example to add labels of different videos
 
-    MMSkeleton addresses to multiple tasks in human understanding, including but not limited to:
-    - [x] [skeleton-based action recognition (ST-GCN)](./doc/START_RECOGNITION.md)
-    - [x] [2D pose estimation](./doc/START_POSE_ESTIMATION.md)
-    - [ ] skeleton-based action generation
-    - [ ] 3D pose estimation
-    - [ ] pose tracking
-    - [x] [build custom skeleton-based dataset](./doc/CUSTOM_DATASET.md)
-    - [x] [create your own applications](./doc/CREATE_APPLICATION.md)
+4. run the command below in ./ to extract the skeleton data of the videos
+   The extracted skeleton can be found in ./data/dataset_example/
 
-## Getting Started
+   ```
+   mmskl configs/utils/build_dataset_example.yaml --gpus [num of gpus]
+   ```
 
-Please see [GETTING_STARTED.md](./doc/GETTING_STARTED.md) for more details of MMSkeleton.
+5. Run the command below in ./ to train a new model.
 
-## License
-The project is release under the [Apache 2.0 license](./LICENSE).
+   ```
+   mmskl configs/recognition/st_gcn/dataset_example/train.yaml
+   ```
 
-## Contributing
-We appreciate all contributions to improve MMSkeleton.
-Please refer to [CONTRIBUTING.md](./doc/CONTRIBUTING.md) for the contributing guideline.
+6. Run the command below in ./ to train a new model.
 
+   ```
+   mmskl configs/recognition/st_gcn/dataset_example/test.yaml
+   ```
 
-## Citation
-Please cite the following paper if you use this repository in your reseach.
-<!-- @inproceedings{stgcn2018aaai,
-  title     = {Spatial Temporal Graph Convolutional Networks for Skeleton-Based Action Recognition},
-  author    = {Sijie Yan and Yuanjun Xiong and Dahua Lin},
-  booktitle = {AAAI},
-  year      = {2018},
-} -->
-```
-@misc{mmskeleton2019,
-  author =       {Sijie Yan, Yuanjun Xiong, Jingbo Wang, Dahua Lin},
-  title =        {MMSkeleton},
-  howpublished = {\url{https://github.com/open-mmlab/mmskeleton}},
-  year =         {2019}
-}
-```
+7. Run the command below in ./ to get the visualized video.
 
-## Contact
-For any question, feel free to contact
-```
-Sijie Yan     : ys016@ie.cuhk.edu.hk
-Jingbo Wang   : wangjingbo1219@foxmail.com
-Yuanjun Xiong : bitxiong@gmail.com
-```
+   a. If you want to get a visualized video, you can run the command below.
+   The default path of the visualized video: "./visualized_video.avi"
+   You the modify the file in "./mmskeleton/processor/demo_offline.py" in line 83.
+
+   ```
+   python main.py demo_offline --openpose "[path to openpose build folder]" --video "[path to target video]"
+   ```
+
+   b. If you want to get a classification result of lists of video, you can run the command below after change variable visualization in "./mmskeleton/processor/demo_offline.py" in line 33 to False.
+   The default path of the classification result: "./label_output.csv"
+   You the modify the file in "./mmskeleton/processor/demo_offline.py" in line 43.
+
+   ```
+   python main.py demo_offline --openpose "[path to openpose build folder]" --video "[path to target folder]"
+   ```

@@ -14,10 +14,10 @@ if __name__ == '__main__':
 
     # region register processor yapf: disable
     processors = dict()
-    processors['recognition'] = import_class('processor.recognition.REC_Processor')
-    processors['demo_old'] = import_class('processor.demo_old.Demo')
-    processors['demo'] = import_class('processor.demo_realtime.DemoRealtime')
-    processors['demo_offline'] = import_class('processor.demo_offline.DemoOffline')
+    # processors['recognition'] = import_class('mmskeleton.processor.recognition.REC_Processor')
+    # processors['demo_old'] = import_class('mmskeleton.processor.demo_old.Demo')
+    # processors['demo'] = import_class('mmskeleton.processor.demo_realtime.DemoRealtime')
+    processors['demo_offline'] = import_class('mmskeleton.processor.demo_offline.DemoOffline')
     #endregion yapf: enable
 
     # add sub-parser
@@ -42,6 +42,6 @@ if __name__ == '__main__':
         yaml.dump(default_arg, f)
     # start
     Processor = processors[arg.processor]
-
+    print(sys.argv[2:], "========================", file=sys.stdout)
     p = Processor(sys.argv[2:])
     p.start()

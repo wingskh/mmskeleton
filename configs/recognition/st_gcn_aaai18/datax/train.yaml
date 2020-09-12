@@ -20,7 +20,7 @@ processor_cfg:
   model_cfg:
     type: 'models.backbones.ST_GCN_18'
     in_channels: 3
-    num_class: 4
+    num_class: 7
     edge_importance_weighting: True
     graph_cfg:
       layout: 'coco'
@@ -37,7 +37,7 @@ processor_cfg:
         data_dir: ./data/dataset_example
         num_track: 2
         num_keypoints: 17
-        repeat: 20
+        repeat: 40
       pipeline:
         - {type: "datasets.skeleton.normalize_by_resolution"}
         - {type: "datasets.skeleton.mask_by_visibility"}
@@ -50,7 +50,7 @@ processor_cfg:
     - type: "datasets.DataPipeline"
       data_source:
         type: "datasets.SkeletonLoader"
-        data_dir: ./data/dataset_example
+        data_dir: ./data/test_dataset
         num_track: 2
         num_keypoints: 17
       pipeline:
@@ -68,7 +68,7 @@ processor_cfg:
   # optimizer setting
   optimizer_cfg:
     type: 'torch.optim.SGD'
-    lr: 0.1
+    lr: 0.001
     momentum: 0.9
     nesterov: true
     weight_decay: 0.0001
@@ -86,7 +86,7 @@ processor_cfg:
       hooks: 
         - type: TextLoggerHook 
     checkpoint_config: 
-      interval: 5 
+      interval: 5
     optimizer_config:
       grad_clip:
   resume_from:

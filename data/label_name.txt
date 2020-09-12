@@ -1,0 +1,7 @@
+get_new
+put_on_mock
+spin_first
+spin_second
+cut
+pack
+catch_wire

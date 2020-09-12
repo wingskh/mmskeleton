@@ -24,7 +24,7 @@ class Processor(IO):
     """
 
     def __init__(self, argv=None):
-
+        
         self.load_arg(argv)
         self.init_environment()
         self.load_model()

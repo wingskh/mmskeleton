@@ -22,11 +22,17 @@ class IO():
 
     def __init__(self, argv=None):
 
+        print("==================================================================================== Start", file=sys.stdout) 
         self.load_arg(argv)
+        print("==================================================================================== load_arg", file=sys.stdout) 
         self.init_environment()
+        print("==================================================================================== init_environment", file=sys.stdout) 
         self.load_model()
+        print("==================================================================================== load_model", file=sys.stdout) 
         self.load_weights()
+        print("==================================================================================== load_weights", file=sys.stdout) 
         self.gpu()
+        print("==================================================================================== gpu", file=sys.stdout) 
 
     def load_arg(self, argv=None):
         parser = self.get_parser()

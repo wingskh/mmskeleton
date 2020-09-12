@@ -3,6 +3,7 @@ import json
 import mmcv
 import numpy as np
 import ntpath
+import sys
 from mmskeleton.apis.estimation import init_pose_estimator, inference_pose_estimator
 from mmskeleton.utils import call_obj
 from mmskeleton.datasets import skeleton
@@ -78,28 +79,56 @@ def build(detection_cfg,
 
         for i, image in enumerate(video_frames):
             inputs.put((i, image))
-
+        
         for i in range(len(video_frames)):
             t = results.get()
             if not t['has_return']:
                 continue
-
             num_person = len(t['joint_preds'])
             assert len(t['person_bbox']) == num_person
+            
+            
+            # ================================================================================================================================
+            # for capture the person with largest bbox onbly
+            # (top-left x, top-left y, bottom-right x, bottom-right y)
+            
+            max_person_bbox_index = -1
+            max_area = -1
 
             for j in range(num_person):
-                keypoints = [[p[0], p[1], round(s[0], 2)] for p, s in zip(
-                    t['joint_preds'][j].round().astype(int).tolist(), t[
-                        'joint_scores'][j].tolist())]
-                num_keypoints = len(keypoints)
-                person_info = dict(
-                    person_bbox=t['person_bbox'][j].round().astype(int)
-                    .tolist(),
-                    frame_index=t['frame_index'],
-                    id=j,
-                    person_id=None,
-                    keypoints=keypoints)
-                annotations.append(person_info)
+                current_person_bbox = t['person_bbox'][j]
+                current_area = abs(current_person_bbox[0] - current_person_bbox[2])*abs(current_person_bbox[1]-current_person_bbox[3])
+                print(f"max_area: {max_area}   ;   current_area: {current_area}")
+                if current_area > max_area:
+                    max_person_bbox_index = j
+            
+            keypoints = [[p[0], p[1], round(s[0], 2)] for p, s in zip(
+                t['joint_preds'][max_person_bbox_index].round().astype(int).tolist(), t[
+                    'joint_scores'][max_person_bbox_index].tolist())]
+            num_keypoints = len(keypoints)
+            person_info = dict(
+                person_bbox=t['person_bbox'][max_person_bbox_index].round().astype(int)
+                .tolist(),
+                frame_index=t['frame_index'],
+                id=0,
+                person_id=None,
+                keypoints=keypoints)
+            annotations.append(person_info)
+            # ================================================================================================================================
+            
+            # for j in range(num_person):
+            #     keypoints = [[p[0], p[1], round(s[0], 2)] for p, s in zip(
+            #         t['joint_preds'][j].round().astype(int).tolist(), t[
+            #             'joint_scores'][j].tolist())]
+            #     num_keypoints = len(keypoints)
+            #     person_info = dict(
+            #         person_bbox=t['person_bbox'][j].round().astype(int)
+            #         .tolist(),
+            #         frame_index=t['frame_index'],
+            #         id=j,
+            #         person_id=None,
+            #         keypoints=keypoints)
+            #     annotations.append(person_info)
 
         # output results
         annotations = sorted(annotations, key=lambda x: x['frame_index'])

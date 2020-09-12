@@ -1,0 +1,12 @@
+device:
+- 0
+model: mmskeleton.models.backbones.ST_GCN_18
+model_args:
+  edge_importance_weighting: true
+  graph_cfg:
+    layout: coco
+    strategy: spatial
+  in_channels: 3
+  num_class: 7
+model_fps: 30
+weights: ./work_dir/recognition/st_gcn/dataset_example/latest_epoch_65.pt

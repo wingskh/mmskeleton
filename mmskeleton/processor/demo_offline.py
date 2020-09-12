@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 import os
+from os import walk
 import sys
 import argparse
 import json
@@ -9,10 +10,12 @@ import math
 import numpy as np
 import torch
 import skvideo.io
-
-from .io import IO
-import tools
-import tools.utils as utils
+import sys
+from deprecated.origin_stgcn_repo.processor.io import IO
+import deprecated.origin_stgcn_repo.tools
+import deprecated.origin_stgcn_repo.tools.utils as utils
+import mmcv
+from mmskeleton.apis import init_pose_estimator, inference_pose_estimator
 
 import cv2
 
@@ -21,56 +24,71 @@ class DemoOffline(IO):
 
     def start(self):
         # initiate
-        print("============ in start")
-        label_name_path = './resource/kinetics_skeleton/label_name.txt'
+        label_name_path = './data/label_name.txt'
         with open(label_name_path) as f:
             label_name = f.readlines()
             label_name = [line.rstrip() for line in label_name]
             self.label_name = label_name
 
+        visualization = True
         # pose estimation
-        video, data_numpy = self.pose_estimation()
 
-        # action recognition
-        data = torch.from_numpy(data_numpy)
-        data = data.unsqueeze(0)
-        data = data.float().to(self.dev).detach()  # (1, channel, frame, joint, person)
+        if not visualization:
+            files = []
+            path = self.arg.video
+            for (dirpath, dirnames, filenames) in walk(path):
+                files.extend(filenames)
+            files.sort()
 
-        # model predict
-        voting_label_name, video_label_name, output, intensity = self.predict(
-            data)
-        # render the video
-        images = self.render_video(data_numpy, voting_label_name,
-                                   video_label_name, intensity, video)
+            filename = 'label_output.csv'
+            with open(filename, 'w') as fd:
+                pass
 
-        # visualize
-        # fourcc = cv2.VideoWriter_fourcc(*'XVID')
-        try:
-            (H, W, c) = images.shape
-            print(images.shape, file=sys.stdout)
-            print("============= H, W, c:", H, W, c, file=sys.stdout)
-        except:
-            print("Exception~:(", file=sys.stdout)
-        # fourcc = cv2.VideoWriter_fourcc(*'XVID')
-        fourcc = cv2.VideoWriter_fourcc('M', 'J', 'P', 'G')
-        out = cv2.VideoWriter('visualized_video.avi',
-                              fourcc, 30.0, (1434, 1080))
-        counter = 0
-        for image in images:
+            for file in files:
+                video, data_numpy = self.pose_estimation(
+                    visualization, path, file)
 
-            try:
-                print("image.size:", image.size, file=sys.stdout)
-                print("image.shape:", image.shape, file=sys.stdout)
-            except:
-                print("Exception~:(", file=sys.stdout)
-            counter += 1
-            image = image.astype(np.uint8)
-            out.write(image)
-            # cv2.imshow("ST-GCN", image)
-            # if cv2.waitKey(1) & 0xFF == ord('q'):
-            #     break
-        print("the total frame is:", counter, file=sys.stdout)
-        # out.release()
+                # action recognition
+                data = torch.from_numpy(data_numpy)
+                data = data.unsqueeze(0)
+                data = data.float().to(self.dev).detach()  # (1, channel, frame, joint, person)
+
+                # model predict
+                voting_label_name, video_label_name, output, intensity = self.predict(
+                    data)
+
+                with open(filename, 'a+') as fd:
+                    fd.write(file+', '+voting_label_name+'\n')
+        else:
+            # for visualization
+            # pose estimation
+            video, data_numpy = self.pose_estimation(visualization)
+
+            # action recognition
+            data = torch.from_numpy(data_numpy)
+            data = data.unsqueeze(0)
+            data = data.float().to(self.dev).detach()  # (1, channel, frame, joint, person)
+
+            # model predict
+            voting_label_name, video_label_name, output, intensity = self.predict(
+                data)
+
+            # render the video
+            images = self.render_video(data_numpy, voting_label_name,
+                                       video_label_name, intensity, video)
+
+            # visualize
+            # fourcc = cv2.VideoWriter_fourcc(*'XVID')
+            fourcc = cv2.VideoWriter_fourcc('M', 'J', 'P', 'G')
+            out = cv2.VideoWriter('visualized_video.avi',
+                                  fourcc, 30.0, (1434, 1080))
+            counter = 0
+            for image in images:
+                counter += 1
+                image = image.astype(np.uint8)
+                out.write(image)
+            print("The total frame is:", counter, file=sys.stdout)
+            out.release()
 
     def predict(self, data):
         # forward
@@ -86,14 +104,12 @@ class DemoOffline(IO):
             dim=2).sum(dim=1).argmax(dim=0)
         voting_label_name = self.label_name[voting_label]
         # classification result for each person of the latest frame
-        # num_person = 1
         num_person = data.size(4)
         latest_frame_label = [output[:, :, :, m].sum(
             dim=2)[:, -1].argmax(dim=0) for m in range(num_person)]
         latest_frame_label_name = [self.label_name[l]
                                    for l in latest_frame_label]
 
-        # num_person = 1
         num_person = output.size(3)
         num_frame = output.size(1)
         video_label_name = list()
@@ -116,26 +132,7 @@ class DemoOffline(IO):
             self.arg.height)
         return images
 
-    def find_sum_of_edge(self, input_point):
-        # num_node = 17
-        # self_link = [(i, i) for i in range(num_node)]
-        neighbor_1base = [[16, 14], [14, 12], [17, 15], [15, 13], [12, 13],
-                          [6, 12], [7, 13], [6, 7], [8, 6], [9, 7],
-                          [10, 8], [11, 9], [2, 3], [2, 1], [3, 1], [4, 2],
-                          [5, 3], [4, 6], [5, 7]]
-        neighbor_link = [(i - 1, j - 1) for (i, j) in neighbor_1base]
-        sum_of_edge = 0
-        for i, j in neighbor_link:
-            try:
-                sum_of_edge += math.sqrt(pow(input_point[i][0] - input_point[j][0], 2)
-                                         + pow(input_point[i][1] - input_point[j][1], 2))
-            except IndexError:
-                print(i, j, input_point.shape, file=sys.stdout)
-                raise IndexError
-
-        return sum_of_edge
-
-    def pose_estimation(self):
+    def pose_estimation(self, visualization, path="", filename=""):
         # load openpose python api
         if self.arg.openpose is not None:
             sys.path.append('{}/python'.format(self.arg.openpose))
@@ -146,15 +143,22 @@ class DemoOffline(IO):
             print('Can not find Openpose Python API.')
             return
 
-        video_name = self.arg.video.split('/')[-1].split('.')[0]
+        # video_name = self.arg.video.split('/')[-1].split('.')[0]
 
         # initiate
-        opWrapper = op.WrapperPython()
-        params = dict(model_folder='./models', model_pose='COCO')
-        opWrapper.configure(params)
-        opWrapper.start()
+
+        cfg = mmcv.Config.fromfile(
+            'configs/apis/pose_estimator.cascade_rcnn+hrnet.yaml')
+        video = mmcv.VideoReader('data/video/frame/cut_13.mp4')
+
+        model = init_pose_estimator(**cfg, device=0)
+
         self.model.eval()
-        video_capture = cv2.VideoCapture(self.arg.video)
+
+        if visualization:
+            video_capture = cv2.VideoCapture(self.arg.video)
+        else:
+            video_capture = cv2.VideoCapture(path + filename)
         video_length = int(video_capture.get(cv2.CAP_PROP_FRAME_COUNT))
         pose_tracker = naive_pose_tracker(data_frame=video_length)
 
@@ -162,8 +166,8 @@ class DemoOffline(IO):
         start_time = time.time()
         frame_index = 0
         video = list()
-        while(True):
 
+        while(True):
             # get image
             ret, orig_image = video_capture.read()
             if orig_image is None:
@@ -174,49 +178,44 @@ class DemoOffline(IO):
             H, W, _ = orig_image.shape
             video.append(orig_image)
 
-            # pose estimation
-            datum = op.Datum()
-            datum.cvInputData = orig_image
-            opWrapper.emplaceAndPop([datum])
-            multi_pose = datum.poseKeypoints  # (num_person, num_joint, 3)
+            estimator_result = inference_pose_estimator(model, orig_image)
+
+            # # pose estimation
+
+            max_person_bbox_index = -1
+            max_area = -1
+            person_boxes = estimator_result['person_bbox']
+
+            for index, person_box in enumerate(person_boxes):
+                current_area = abs(
+                    person_box[0] - person_box[2])*abs(person_box[1]-person_box[3])
+
+                if current_area > max_area:
+                    max_person_bbox_index = index
+
+            keypoints = np.array([[np.array([p[0], p[1], round(s[0], 2)]) for p, s in zip(
+                estimator_result['joint_preds'][max_person_bbox_index].round().astype(
+                    int).tolist(),
+                estimator_result['joint_scores'][max_person_bbox_index].tolist())]])
+
+            multi_pose = keypoints
             if len(multi_pose.shape) != 3:
                 continue
-            temp_multi_pose = np.array([])
-            temp_multi_pose = np.array([[multi_pose[0][0], multi_pose[0][14], multi_pose[0][15], multi_pose[0][16], multi_pose[0][17],
-                                         multi_pose[0][2], multi_pose[0][5], multi_pose[0][3], multi_pose[0][6], multi_pose[0][4],
-                                         multi_pose[0][7], multi_pose[0][8], multi_pose[0][11], multi_pose[0][9], multi_pose[0][12],
-                                         multi_pose[0][10], multi_pose[0][13]]])
-            for k in range(len(multi_pose)-1):
-                temp_multi_pose = np.concatenate((temp_multi_pose, [np.array([multi_pose[k+1][0], multi_pose[k+1][14], multi_pose[k+1][15], multi_pose[k+1][16], multi_pose[k+1][17],
-                                                                              multi_pose[k+1][2], multi_pose[k+1][5], multi_pose[k +
-                                                                                                                                 1][3], multi_pose[k+1][6], multi_pose[k+1][4],
-                                                                              multi_pose[k+1][7], multi_pose[k+1][8], multi_pose[k +
-                                                                                                                                 1][11], multi_pose[k+1][9], multi_pose[k+1][12],
-                                                                              multi_pose[k+1][10], multi_pose[k+1][13]])]))
 
-            # max_sum_of_edges = -1
-            # final_multi_pose = []
-            # for k in temp_multi_pose:
-            #     current_sum_of_edges = self.find_sum_of_edge(k)
-
-            #     if current_sum_of_edges > max_sum_of_edges:
-            #         final_multi_pose =np.array([k])
-            # print(final_multi_pose.shape,"======================", sys.stdout)
-            # multi_pose = final_multi_pose
-            multi_pose = temp_multi_pose
             # normalization
             multi_pose[:, :, 0] = multi_pose[:, :, 0]/W
             multi_pose[:, :, 1] = multi_pose[:, :, 1]/H
             multi_pose[:, :, 0:2] = multi_pose[:, :, 0:2] - 0.5
             multi_pose[:, :, 0][multi_pose[:, :, 2] == 0] = 0
             multi_pose[:, :, 1][multi_pose[:, :, 2] == 0] = 0
+
             # pose tracking
             pose_tracker.update(multi_pose, frame_index)
             frame_index += 1
-
             print('Pose estimation ({}/{}).'.format(frame_index, video_length))
 
         data_numpy = pose_tracker.get_skeleton_sequence()
+
         return video, data_numpy
 
     @staticmethod
@@ -247,7 +246,7 @@ class DemoOffline(IO):
                             type=int,
                             help='height of frame in the output video.')
         parser.set_defaults(
-            config='./config/st_gcn/kinetics-skeleton/demo_offline.yaml')
+            config='./configs/recognition/st_gcn_aaai18/datax/demo_offline.yaml')
         parser.set_defaults(print_log=False)
         # endregion yapf: enable
 

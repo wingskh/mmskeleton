@@ -57,7 +57,6 @@ def worker(video_file, index, detection_cfg, skeleton_cfg, skeleon_data_cfg,
         image = video_frames[idx]
         draw_image = image.copy()
         bbox_result = inference_detector(detection_model, image)
-
         person_bbox, labels = VideoDemo.bbox_filter(bbox_result,
                                                     detection_cfg.bbox_thre)
 

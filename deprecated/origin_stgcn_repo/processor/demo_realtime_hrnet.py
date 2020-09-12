@@ -5,6 +5,8 @@ import argparse
 import json
 import shutil
 import time
+import ast
+import threading
 
 import numpy as np
 import torch
@@ -13,116 +15,192 @@ import skvideo.io
 from .io import IO
 import tools
 import tools.utils as utils
-
+from tools.utils.live import Stack
+from tools.utils.live import capture_thread
+# TODO import HRNet_model
+from pose_estimator.simple_HRNet.SimpleHRNet import SimpleHRNet
 import cv2
+
 
 class DemoRealtime(IO):
     """ A demo for utilizing st-gcn in the realtime action recognition.
     The Openpose python-api is required for this demo.
-
     Since the pre-trained model is trained on videos with 30fps,
     and Openpose is hard to achieve this high speed in the single GPU,
     if you want to predict actions by **camera** in realtime,
     either data interpolation or new pre-trained model
     is required.
-
     Pull requests are always welcome.
     """
 
     def start(self):
         # load openpose python api
-        if self.arg.openpose is not None:
-            sys.path.append('{}/python'.format(self.arg.openpose))
-            sys.path.append('{}/build/python'.format(self.arg.openpose))
-        try:
-            from openpose import pyopenpose as op
-        except:
-            print('Can not find Openpose Python API.')
-            return
+        # if self.arg.openpose is not None:
+        #     sys.path.append('{}/python'.format(self.arg.openpose))
+        #     sys.path.append('{}/build/python'.format(self.arg.openpose))
+        # try:
+        #     from openpose import pyopenpose as op
+        # except:
+        #     print('Can not find Openpose Python API.')
+        #     return
 
-        video_name = self.arg.video.split('/')[-1].split('.')[0]
-        label_name_path = './resource/kinetics_skeleton/label_name.txt'
+        label_name_path = './resource/hrnet/label_name.txt'
         with open(label_name_path) as f:
             label_name = f.readlines()
             label_name = [line.rstrip() for line in label_name]
             self.label_name = label_name
 
         # initiate
-        opWrapper = op.WrapperPython()
-        params = dict(model_folder='./models', model_pose='COCO')
-        opWrapper.configure(params)
-        opWrapper.start()
+        # opWrapper = op.WrapperPython()
+        # params = dict(model_folder='./models', model_pose='COCO')
+        # opWrapper.configure(params)
+        # opWrapper.start()
+        # TODO pose_model is simple-HRNet
+        image_resolution = ast.literal_eval(self.arg.image_resolution)
+        pose_model = SimpleHRNet(
+            self.arg.hrnet_c,
+            self.arg.hrnet_j,
+            self.arg.hrnet_weights,
+            resolution=image_resolution,
+            multiperson=not self.arg.single_person,
+            max_batch_size=self.arg.max_batch_size,
+            yolo_model_def=self.arg.yolo_model_def,
+            yolo_weights_path=self.arg.yolo_weights_path,
+            device=self.dev
+        )
         self.model.eval()
         pose_tracker = naive_pose_tracker()
 
-        if self.arg.video == 'camera_source':
-            video_capture = cv2.VideoCapture(0)
-        else:
-            video_capture = cv2.VideoCapture(self.arg.video)
+        print ("load video......")
+        #if self.arg.video == 'camera_source':
+        #    video_capture = cv2.VideoCapture(0)
+        #else:
+        #    video_capture = cv2.VideoCapture(self.arg.video)
+
+        frame_buffer = Stack(3)
+        lock = threading.RLock()
+        t1 = threading.Thread(target=capture_thread, args=(self.arg.video, frame_buffer, lock))
+        # t1 = threading.Thread(target=capture_thread, args=(self.arg.video, frame_buffer))
+        t1.start()
 
         # start recognition
         start_time = time.time()
         frame_index = 0
-        fourcc = cv2.VideoWriter_fourcc('M','J','P','G')
-        out = cv2.VideoWriter('output_temp_temp.avi', fourcc, 30.0, (1434, 1080))
-        while(True):
+        while (True):
 
             tic = time.time()
-
+            
+            if frame_buffer.size() > 0:
+                lock.acquire()
+                frame = frame_buffer.pop()
+                lock.release()
+                now = time.time()
+                #print("start a frame: {}".format(now))
+            else:
+                # print("continue")
+                continue
+            
             # get image
-            ret, orig_image = video_capture.read()
+            # video_capture = cv2.VideoCapture(self.arg.video)
+            # ret, orig_image = video_capture.read()
+            # print(orig_image)
+            orig_image = frame
             if orig_image is None:
                 break
-            source_H, source_W, _ = orig_image.shape
-            orig_image = cv2.resize(
-                orig_image, (256 * source_W // source_H, 256))
+            # source_H, source_W, _ = orig_image.shape
+            # orig_image = cv2.resize(
+            #     orig_image, (256 * source_W // source_H, 256))
+            # H, W, _ = orig_image.shape
             H, W, _ = orig_image.shape
-            
+
             # pose estimation
-            datum = op.Datum()
-            datum.cvInputData = orig_image
-            opWrapper.emplaceAndPop([datum])
-            multi_pose = datum.poseKeypoints  # (num_person, num_joint, 3)
+            # datum = op.Datum()
+            # datum.cvInputData = orig_image
+            # opWrapper.emplaceAndPop([datum])
+            # multi_pose = datum.poseKeypoints  
+            multi_pose_17 = pose_model.predict(orig_image)  # multi_pose: (num_person, num_joint, 3)
+            now1 = time.time()
+            #print("pose estimation a frame: {}".format(now1-tic))
+            # TODO 17 joints -> 18 joints
+            if multi_pose_17.shape[0] > 0:
+                neck = 0.5 * (multi_pose_17[:, 5, :] + multi_pose_17[:, 6, :])  # neck is the mean of shoulders
+                neck = np.expand_dims(neck, 1)  # shape: [n, 3] -> [n, 1, 3]
+                # print('neck.shape: {}'.format(neck.shape))
+                multi_pose_18 = np.concatenate((multi_pose_17, neck), 1)
+                # print('multi_pose_18.shape: {}'.format(multi_pose_18.shape))
+                # convert coco format to openpose format
+                # convert coco format to openpose format
+                multi_pose = multi_pose_18[:, [0, 17, 6, 8, 10, 5, 7, 9, 12, 14, 16, 11, 13, 15, 2, 1, 4, 3], :]
+            else:
+                continue
             if len(multi_pose.shape) != 3:
                 continue
 
             # normalization
-            multi_pose[:, :, 0] = multi_pose[:, :, 0]/W
-            multi_pose[:, :, 1] = multi_pose[:, :, 1]/H
+            # convert x and y
+            multi_pose = multi_pose[:, :, [1, 0, 2]]
+            multi_pose[:, :, 0] = multi_pose[:, :, 0] / W
+            multi_pose[:, :, 1] = multi_pose[:, :, 1] / H
             multi_pose[:, :, 0:2] = multi_pose[:, :, 0:2] - 0.5
             multi_pose[:, :, 0][multi_pose[:, :, 2] == 0] = 0
             multi_pose[:, :, 1][multi_pose[:, :, 2] == 0] = 0
+            now2 = time.time()
+            print("convert a frame: {}".format(now2-now1))
 
             # pose tracking
             if self.arg.video == 'camera_source':
-                frame_index = int((time.time() - start_time)*self.arg.fps)
+                frame_index = int((time.time() - start_time) * self.arg.fps)
             else:
                 frame_index += 1
             pose_tracker.update(multi_pose, frame_index)
             data_numpy = pose_tracker.get_skeleton_sequence()
+            print("get_skeleton_sequence: {} frame".format(data_numpy.shape[1]))
             data = torch.from_numpy(data_numpy)
             data = data.unsqueeze(0)
             data = data.float().to(self.dev).detach()  # (1, channel, frame, joint, person)
+            now3 = time.time()
+            print("pose track a frame: {}".format(now3-now2))
 
             # model predict
             voting_label_name, video_label_name, output, intensity = self.predict(
                 data)
+            now4 = time.time()
+            print("action recognition a frame: {}".format(now4-now3))
 
             # visualization
             app_fps = 1 / (time.time() - tic)
+            print("fps:{}".format(app_fps))
+            
             image = self.render(data_numpy, voting_label_name,
                                 video_label_name, intensity, orig_image, app_fps)
-            out.write(image)
-            # cv2.imshow("ST-GCN", image)
-            # if cv2.waitKey(1) & 0xFF == ord('q'):
-                # break
+            now5 = time.time()
+            print("render a frame: {}".format(now5-now4))
+
+            #cv2.imshow("ST-GCN", image)
+
+            now6 = time.time()
+            print("visualize a frame: {}".format(now6-now5))
+            
+            print("action class:{}\n".format(voting_label_name))
+            # save image
+            #if voting_label_name == "clean_and_jerk":
+            if voting_label_name:
+                #image = self.render(data_numpy, voting_label_name, video_label_name, intensity, orig_image, app_fps)
+                action_path = os.path.join("./action", voting_label_name+"_"+str(tic)+".png")
+                cv2.imwrite(action_path, image)
+                cv2.imwrite("action.png",image)
+            
+            if cv2.waitKey(30) & 0xFF == ord('q'):
+                break
+            # video_capture.release()
+            # print("1111111111")
 
     def predict(self, data):
         # forward
         output, feature = self.model.extract_feature(data)
         output = output[0]
         feature = feature[0]
-        intensity = (feature*feature).sum(dim=0)**0.5
+        intensity = (feature * feature).sum(dim=0) ** 0.5
         intensity = intensity.cpu().detach().numpy()
 
         # get result
@@ -132,7 +210,6 @@ class DemoRealtime(IO):
         voting_label_name = self.label_name[voting_label]
         # classification result for each person of the latest frame
         num_person = data.size(4)
-        # num_person = 1
         latest_frame_label = [output[:, :, :, m].sum(
             dim=2)[:, -1].argmax(dim=0) for m in range(num_person)]
         latest_frame_label_name = [self.label_name[l]
@@ -190,12 +267,58 @@ class DemoRealtime(IO):
                             default=1080,
                             type=int,
                             help='height of frame in the output video.')
+        parser.add_argument("--action",
+                            help="the action name want to save",
+                            type=str,
+                            default="clean_and_jerk")
+
+        # HRNet arguments
+        parser.add_argument("--hrnet_c",
+                            help="hrnet parameters - number of channels",
+                            type=int,
+                            default=32)
+        parser.add_argument("--hrnet_j", "-j",
+                            help="hrnet parameters - number of joints",
+                            type=int,
+                            default=17)
+        parser.add_argument("--hrnet_weights",
+                            help="hrnet parameters - path to the pretrained weights",
+                            type=str,
+                            default="./pose_estimator/simple_HRNet/weights/pose_hrnet_w32_256x192.pth")
+        parser.add_argument("--image_resolution", "-r",
+                            help="image resolution of HRNet input",
+                            type=str,
+                            default='(256, 192)')
+        parser.add_argument("--single_person",
+                            help="disable the multiperson detection (YOLOv3 or an equivalen detector is required for"
+                                 "multiperson detection)",
+                            action="store_true")
+        parser.add_argument("--max_batch_size",
+                            help="maximum batch size used for inference, used for multiperson detector YOLOv3",
+                            type=int,
+                            default=16)
+        parser.add_argument("--yolo_model_def",
+                            help="path to yolo model definition file",
+                            type=str,
+                            default="./pose_estimator/simple_HRNet/models/detectors/yolo/config/yolov3-tiny.cfg")
+        parser.add_argument("--yolo_weights_path",
+                            help="path to yolo pretrained weights file",
+                            type=str,
+                            default="./pose_estimator/simple_HRNet/models/detectors/yolo/weights/yolov3-tiny.weights")
+        # argument "--device" is duplicate with IO (which is the parent class of this class, in io.py)
+        # parser.add_argument("--device",
+        #                     help="device to be used (default: cuda, if available)",
+        #                     type=str,
+        #                     default=None)
+
+        # st-gcn default settings
         parser.set_defaults(
-            config='./config/st_gcn/kinetics-skeleton/demo_realtime.yaml')
+            config='./config/st_gcn/kinetics-skeleton/demo_realtime_hrnet.yaml')
         parser.set_defaults(print_log=False)
         # endregion yapf: enable
 
         return parser
+
 
 class naive_pose_tracker():
     """ A simple tracker for recording person poses and generating skeleton sequences.
@@ -203,7 +326,7 @@ class naive_pose_tracker():
     Pull-requests are welcomed.
     """
 
-    def __init__(self, data_frame=128, num_joint=17, max_frame_dis=np.inf):
+    def __init__(self, data_frame=128, 7, max_frame_dis=np.inf):
         self.data_frame = data_frame
         self.num_joint = num_joint
         self.max_frame_dis = max_frame_dis
@@ -218,17 +341,6 @@ class naive_pose_tracker():
 
         if len(multi_pose.shape) != 3:
             return
-
-        temp_multi_pose = np.array([[multi_pose[0][0], multi_pose[0][14], multi_pose[0][15], multi_pose[0][16], multi_pose[0][17],
-                                multi_pose[0][2], multi_pose[0][5], multi_pose[0][3], multi_pose[0][6], multi_pose[0][4], 
-                                multi_pose[0][7], multi_pose[0][8], multi_pose[0][11], multi_pose[0][9], multi_pose[0][12], 
-                                multi_pose[0][10], multi_pose[0][13]]])
-        for k in range(len(multi_pose)-1):
-            temp_multi_pose = np.concatenate((temp_multi_pose, [np.array([multi_pose[k+1][0], multi_pose[k+1][14], multi_pose[k+1][15], multi_pose[k+1][16], multi_pose[k+1][17],
-                                    multi_pose[k+1][2], multi_pose[k+1][5], multi_pose[k+1][3], multi_pose[k+1][6], multi_pose[k+1][4], 
-                                    multi_pose[k+1][7], multi_pose[k+1][8], multi_pose[k+1][11], multi_pose[k+1][9], multi_pose[k+1][12], 
-                                    multi_pose[k+1][10], multi_pose[k+1][13]])]))
-        multi_pose = temp_multi_pose
 
         score_order = (-multi_pose[:, :, 2].sum(axis=1)).argsort(axis=0)
         for p in multi_pose[score_order]:
@@ -255,7 +367,7 @@ class naive_pose_tracker():
 
                 # padding zero if the trace is fractured
                 pad_mode = 'interp' if latest_frame == self.latest_frame else 'zero'
-                pad = current_frame-latest_frame-1
+                pad = current_frame - latest_frame - 1
                 new_trace = self.cat_pose(trace, p, pad, pad_mode)
                 self.trace_info[matching_trace] = (new_trace, current_frame)
 
@@ -265,6 +377,7 @@ class naive_pose_tracker():
 
         self.latest_frame = current_frame
 
+    # TODO how many frames are included
     def get_skeleton_sequence(self):
 
         # remove old traces
@@ -298,8 +411,8 @@ class naive_pose_tracker():
                     (trace, np.zeros((pad, num_joint, 3))), 0)
             elif pad_mode == 'interp':
                 last_pose = trace[-1]
-                coeff = [(p+1)/(pad+1) for p in range(pad)]
-                interp_pose = [(1-c)*last_pose + c*pose for c in coeff]
+                coeff = [(p + 1) / (pad + 1) for p in range(pad)]
+                interp_pose = [(1 - c) * last_pose + c * pose for c in coeff]
                 trace = np.concatenate((trace, interp_pose), 0)
         new_trace = np.concatenate((trace, [pose]), 0)
         return new_trace
@@ -310,7 +423,7 @@ class naive_pose_tracker():
         last_pose_xy = trace[-1, :, 0:2]
         curr_pose_xy = pose[:, 0:2]
 
-        mean_dis = ((((last_pose_xy - curr_pose_xy)**2).sum(1))**0.5).mean()
+        mean_dis = ((((last_pose_xy - curr_pose_xy) ** 2).sum(1)) ** 0.5).mean()
         wh = last_pose_xy.max(0) - last_pose_xy.min(0)
         scale = (wh[0] * wh[1]) ** 0.5 + 0.0001
         is_close = mean_dis < scale * self.max_frame_dis
